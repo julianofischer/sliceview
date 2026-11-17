@@ -327,3 +327,119 @@ class TestLiveMutation:
         sv = sliceview(data)
         data.append(4)
         assert len(sv) == 4
+
+    def test_append_reflected_in_reverse_open_view(self):
+        data = [0, 1, 2]
+        sv = sliceview(data, None, None, -1)
+        data.append(3)
+        assert list(sv) == [3, 2, 1, 0]
+
+    def test_shrink_base_clamps_safely(self):
+        data = [0, 1, 2, 3, 4]
+        sv_closed = sliceview(data, 1, 5)
+        sv_neg_open = sliceview(data, None, None, -1)
+        sv_neg_closed = sliceview(data, 4, 0, -2)
+        data.pop()
+        data.pop()
+        assert list(sv_closed) == [1, 2]
+        assert list(sv_neg_open) == [2, 1, 0]
+        assert list(sv_neg_closed) == [2]
+        data.clear()
+        assert list(sv_closed) == []
+        assert list(sv_neg_open) == []
+        assert list(sv_neg_closed) == []
+
+
+# ---------------------------------------------------------------------------
+# Edge cases & regressions
+# ---------------------------------------------------------------------------
+
+class TestEdgeCases:
+    def test_slice_with_stop_or_step_raises(self):
+        with pytest.raises(ValueError):
+            sliceview([1, 2, 3], slice(0, 2), 2)  # type: ignore[call-overload]
+        with pytest.raises(ValueError):
+            sliceview([1, 2, 3], slice(0, 2), None, 1)  # type: ignore[call-overload]
+
+    def test_mapping_base_rejected(self):
+        with pytest.raises(TypeError):
+            sliceview({0: "a", 1: "b"})  # type: ignore[arg-type]
+
+    def test_duck_typed_sequence_accepted(self):
+        class CustomSeq:
+            def __init__(self, items):
+                self._items = list(items)
+            def __len__(self):
+                return len(self._items)
+            def __getitem__(self, idx):
+                return self._items[idx]
+            def __setitem__(self, idx, val):
+                self._items[idx] = val
+
+        seq = CustomSeq([10, 20, 30, 40])
+        sv = sliceview(seq, 1, 3)  # type: ignore[arg-type]
+        assert list(sv) == [20, 30]
+        sv[0] = 99
+        assert seq[1] == 99
+
+    def test_nested_sliceview_unwrapped_in_constructor(self):
+        data = [0, 1, 2, 3, 4, 5]
+        sv1 = sliceview(data, 1, 5)
+        sv2 = sliceview(sv1, 1, 3)
+        assert sv2.base is data
+        assert list(sv2) == [2, 3]
+
+    def test_reverse_step_minus_one_setslice(self):
+        data = [0, 1, 2, 3, 4]
+        sv = sliceview(data)
+        sv[::-1] = [10, 20, 30, 40, 50]
+        assert data == [50, 40, 30, 20, 10]
+        with pytest.raises(ValueError):
+            sv[::-1] = [1, 2]
+
+    def test_nan_contains(self):
+        nan = float("nan")
+        sv = sliceview([1.0, nan, 3.0])
+        assert nan in sv
+
+    def test_supports_index_and_invalid_index_type(self):
+        class MyIdx:
+            def __index__(self):
+                return 1
+
+        sv = sliceview([10, 20, 30])
+        assert sv[MyIdx()] == 20
+        sv[MyIdx()] = 99
+        assert sv[1] == 99
+        with pytest.raises(TypeError):
+            _ = sv[1.5]  # type: ignore[call-overload]
+        with pytest.raises(TypeError):
+            _ = sv["a"]  # type: ignore[call-overload]
+
+    def test_start_stop_step_properties_and_reverse_advance(self):
+        data = list(range(10))
+        sv = sliceview(data, 1, 5, 2)
+        assert (sv.start, sv.stop, sv.step) == (1, 5, 2)
+        sv_rev = sliceview(data, 2, None, -1)
+        assert list(sv_rev) == [2, 1, 0]
+        sv_rev.advance(2)
+        assert list(sv_rev) == [4, 3, 2]
+        sv_rev.advance(-2)
+        assert list(sv_rev) == [2, 1, 0]
+
+    def test_eq_not_implemented_fallback_and_identity(self):
+        class AlwaysEqual:
+            def __eq__(self, other):
+                return True
+
+        sv = sliceview([1, 2, 3])
+        assert sv == sv
+        assert sv == AlwaysEqual()
+
+    def test_repr_truncates_large_base(self):
+        big = list(range(10_000))
+        sv = sliceview(big, 10, 20)
+        r = repr(sv)
+        assert "..." in r
+        assert "[10:20:1]" in r
+        assert len(r) < 100

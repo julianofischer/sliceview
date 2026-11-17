@@ -85,9 +85,13 @@ Returns `self` for chaining.  Useful for sliding-window algorithms:
 view = sliceview(samples, 0, window_size)
 while True:
     result = process(view)
-    if view.advance(window_size)._start >= len(samples):
+    if view.advance(window_size).start >= len(samples):
         break
 ```
+
+### `sv.start`, `sv.stop`, `sv.step`
+
+Read-only properties reflecting the current start, stop, and step indices in the underlying sequence.
 
 ### `sv.tolist()` / `sv.copy()`
 
